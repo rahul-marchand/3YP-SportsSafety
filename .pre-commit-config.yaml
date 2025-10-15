@@ -1,0 +1,21 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      # Run the linter (auto-fixes issues)
+      - id: ruff
+        args: [--fix]
+      # Run the formatter
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace        # Remove trailing spaces
+      - id: end-of-file-fixer          # Ensure files end with newline
+      - id: check-yaml                 # Validate YAML files
+      - id: check-added-large-files    # Prevent committing large files (500KB+)
+        args: [--maxkb=500]
+      - id: check-merge-conflict       # Detect unresolved merge conflicts
+      - id: check-case-conflict        # Prevent issues on case-insensitive filesystems
+      - id: mixed-line-ending          # Ensure consistent line endings

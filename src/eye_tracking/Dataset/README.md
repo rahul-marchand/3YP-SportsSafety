@@ -12,7 +12,7 @@ With this dir as working dir run
 ```bash
 chmod +x download_dataset.sh
 
-./download_datasetet.sh
+./download_dataset.sh
 ```
 
 ## Expected Directory Structure

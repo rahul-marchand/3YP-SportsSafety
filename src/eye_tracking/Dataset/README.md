@@ -7,12 +7,13 @@ https://www.cs.columbia.edu/CAVE/databases/columbia_gaze/
 
 ## Installation
 
-1. Download the ZIP file from the link above
-2. Extract the contents to this directory (`src/eye_tracking/Dataset/`)
-3. **Important**: The path extracted to must be exactly:
-   ```
-   src/eye_tracking/Dataset/
-   ```
+With this dir as working dir run
+
+```bash
+chmod +x download_dataset.sh
+
+./download_datasetet.sh
+```
 
 ## Expected Directory Structure
 

@@ -200,17 +200,23 @@ def train(
 
 def main():
     """Main training function."""
+    # Calculate default paths relative to script location
+    # This allows the script to work from any directory
+    script_dir = Path(__file__).resolve().parent
+    default_data_dir = script_dir.parent / "Dataset"
+    default_save_dir = script_dir / "checkpoints"
+
     parser = argparse.ArgumentParser(description="Train MobileNet for gaze estimation")
     parser.add_argument(
         "--data_dir",
         type=str,
-        default="src/eye_tracking/Dataset",
+        default=str(default_data_dir),
         help="Path to dataset directory",
     )
     parser.add_argument(
         "--save_dir",
         type=str,
-        default="src/eye_tracking/mobilenet/checkpoints",
+        default=str(default_save_dir),
         help="Directory to save checkpoints",
     )
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")

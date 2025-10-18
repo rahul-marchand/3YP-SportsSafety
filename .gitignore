@@ -87,6 +87,9 @@ src/eye_tracking/Dataset/columbia_gaze_data_set/
 *.log
 logs/
 
+# Weights & Biases
+wandb/
+
 # Environment variables
 .env
 .env.local

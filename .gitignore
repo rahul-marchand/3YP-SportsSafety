@@ -80,9 +80,15 @@ checkpoints/
 *.pth
 *.pt
 
+#Dataset
+src/eye_tracking/Dataset/columbia_gaze_data_set/
+
 # Logs
 *.log
 logs/
+
+# Weights & Biases
+wandb/
 
 # Environment variables
 .env
@@ -115,3 +121,9 @@ ios/build/
 tmp/
 temp/
 *.tmp
+
+
+# Ai Helpers
+CLAUDE.md
+.claude/
+.cursorrules/

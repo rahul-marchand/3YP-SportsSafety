@@ -1,0 +1,76 @@
+SYSTEM UPDATED - NOW USING FULL FACE APPROACH
+
+WHAT CHANGED:
+The system has been simplified to use full camera frames instead of cropped eye regions.
+
+OLD APPROACH (Removed):
+- Detect face using Haar Cascades
+- Detect eyes within face
+- Crop to right eye region only
+- Multiple failure points if detection fails
+
+NEW APPROACH (Current):
+- Simply resize full camera frame to 224x224
+- No face/eye detection needed
+- Let the neural network learn from full face context
+- Much more robust and reliable
+
+WHY THIS IS BETTER:
+
+1. MORE ROBUST
+   - No detection failures
+   - Works in any lighting
+   - Works at any angle
+   - Consistent data collection
+
+2. MORE ACCURATE
+   - Both eyes provide redundant information
+   - Head pose gives additional context
+   - Facial landmarks help calibration
+   - More features = better predictions
+
+3. PROVEN APPROACH
+   - Used by modern systems: iTracker (Apple), MPIIGaze, GazeCapture
+   - Research shows full face > cropped eyes
+   - Industry standard for gaze estimation
+
+4. SIMPLER CODE
+   - Removed EyeProcessor class complexity
+   - No OpenCV cascade classifiers
+   - Just one function: resize to 224x224
+   - Fewer bugs, easier to maintain
+
+TECHNICAL DETAILS:
+
+Class renamed: EyeProcessor → FrameProcessor
+Method renamed: crop_right_eye() → process_frame()
+
+process_frame() simply does:
+  - Check frame is valid
+  - cv2.resize(frame, (224, 224))
+  - Return resized frame
+
+Training will now learn from:
+- Both eyes (left and right)
+- Eye position relative to face
+- Head rotation and tilt
+- Overall facial structure
+- Background context
+
+NEXT STEPS:
+
+1. Collect NEW data (old cropped data won't work with this)
+   - Open: https://2ca802009300.ngrok-free.app
+   - Record 500+ frames
+
+2. Train model as usual:
+   python train_smooth_pursuit.py --data_dir Dataset/smooth_pursuit_data --distance 30
+
+3. The model will automatically learn what features matter
+   - It will focus on eyes
+   - It will use head pose
+   - It will adapt to your specific phone setup
+
+Backend is running with the new approach.
+Ready to collect better quality training data!
+

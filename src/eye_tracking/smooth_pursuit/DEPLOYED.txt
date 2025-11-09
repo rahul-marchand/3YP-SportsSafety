@@ -1,0 +1,49 @@
+DEPLOYMENT STATUS
+
+WEB FRONTEND + BACKEND RUNNING
+
+ACCESS FROM YOUR PHONE:
+https://2ca802009300.ngrok-free.app
+
+Local access: http://localhost:8000
+ngrok Dashboard: http://localhost:4040
+
+FEATURES:
+- Landscape mode enforced (rotate phone horizontally)
+- Model selection dropdown (automatically loads available models)
+- Recording mode: Collect training data
+- Inference mode: Test smooth pursuit with selected model
+
+RUNNING PROCESSES:
+- Python backend (port 8000) - FastAPI server
+- ngrok tunnel - Public access
+
+TO STOP:
+pkill -f "python backend.py"
+pkill -f ngrok
+
+TO RESTART:
+cd /Users/suleimanmahmood/Documents/3YP/src/eye_tracking/smooth_pursuit
+source venv/bin/activate
+python backend.py &
+ngrok http 8000 &
+
+HOW TO USE:
+1. Open https://2ca802009300.ngrok-free.app on your phone's browser
+2. Rotate phone to landscape mode
+3. Allow camera access when prompted
+4. Enter viewing distance (e.g., 30cm)
+5. Use "START RECORDING" to collect training data
+6. Use "START TEST" for inference mode (after training model)
+
+TO TRAIN MODEL:
+cd /Users/suleimanmahmood/Documents/3YP/src/eye_tracking/smooth_pursuit
+source venv/bin/activate
+python train_smooth_pursuit.py --data_dir Dataset/smooth_pursuit_data --distance 30
+
+AFTER TRAINING:
+Load model via: curl -X POST http://localhost:8000/api/select-model/model_30cm.pth
+Then use "START TEST" button in web app
+
+NOTE: ngrok URL changes on restart. Port 8000 must be free.
+

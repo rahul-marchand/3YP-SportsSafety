@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Smooth Pursuit Eye Tracking</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+            touch-action: none;
+            position: fixed;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        @media (orientation: portrait) {
+            body::before {
+                content: "Please rotate your device to landscape mode";
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                font-size: 24px;
+                text-align: center;
+                padding: 30px;
+                background: rgba(0, 0, 0, 0.95);
+                border-radius: 12px;
+                z-index: 10000;
+            }
+            
+            #container {
+                display: none;
+            }
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        #dot {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background: #FF3B30;
+            border-radius: 50%;
+            top: 50%;
+            left: 0;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+
+        #camera {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            z-index: 100;
+        }
+
+        .screen {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .screen.active {
+            display: flex;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #222;
+            color: #fff;
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            font-size: 18px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .btn-primary {
+            background: #007AFF;
+            color: #fff;
+        }
+
+        .btn-success {
+            background: #34C759;
+            color: #fff;
+        }
+
+        .btn-danger {
+            background: #FF3B30;
+            color: #fff;
+        }
+
+        .btn-secondary {
+            background: #666;
+            color: #fff;
+        }
+
+        #status {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 16px;
+        }
+
+        #metrics {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        #metrics.show {
+            display: block;
+        }
+
+        .metric-item {
+            margin: 8px 0;
+            font-size: 14px;
+        }
+
+        .label {
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <video id="camera" autoplay playsinline></video>
+        <div id="dot"></div>
+
+        <div id="controls">
+            <!-- Setup Screen -->
+            <div id="setupScreen" class="screen active">
+                <div style="background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; width: 100%;">
+                    <h2 style="margin-bottom: 20px; text-align: center;">Smooth Pursuit Eye Tracking</h2>
+                    
+                    <label class="label">Viewing Distance (cm):</label>
+                    <input type="number" id="distance" value="30" placeholder="30">
+                    
+                    <label class="label">Select Model (for inference):</label>
+                    <select id="modelSelect" style="margin-bottom: 10px;">
+                        <option value="">Loading models...</option>
+                    </select>
+                    <button class="btn-secondary" onclick="refreshModels()" style="font-size: 14px; padding: 10px; margin-bottom: 10px;">Refresh Models</button>
+                    
+                    <button class="btn-primary" onclick="startRecording()">START RECORDING</button>
+                    <button class="btn-success" onclick="startInference()">START TEST</button>
+                </div>
+            </div>
+
+            <!-- Recording Screen -->
+            <div id="recordingScreen" class="screen">
+                <div id="status">Ready to record</div>
+                <button class="btn-danger" onclick="stopRecording()">STOP RECORDING</button>
+                <button class="btn-secondary" onclick="backToSetup()">BACK</button>
+            </div>
+
+            <!-- Inference Screen -->
+            <div id="inferenceScreen" class="screen">
+                <div id="status">Ready to test</div>
+                <div id="metrics"></div>
+                <button class="btn-danger" onclick="stopInference()">STOP TEST</button>
+                <button class="btn-secondary" onclick="backToSetup()">BACK</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = window.location.origin;
+        
+        let video = document.getElementById('camera');
+        let dot = document.getElementById('dot');
+        let stream = null;
+        let socket = null;
+        let frameInterval = null;
+        let animationId = null;
+        let mode = null;
+        let frameCount = 0;
+        let selectedModel = null;
+
+        const DEVICE_SPECS = {
+            screen: {
+                widthCm: 13.2,
+                heightCm: 6.1,
+                widthPx: window.innerWidth,
+                heightPx: window.innerHeight,
+            },
+            camera: {
+                positionPx: { 
+                    x: window.innerWidth / 4,
+                    y: window.innerHeight / 2
+                },
+            }
+        };
+
+        async function initCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                video.srcObject = stream;
+                return true;
+            } catch (err) {
+                alert('Camera access denied: ' + err.message);
+                return false;
+            }
+        }
+
+        function animateDot() {
+            let startTime = Date.now();
+            let duration = 2000;
+            let width = window.innerWidth;
+
+            function animate() {
+                let elapsed = (Date.now() - startTime) % (duration * 2);
+                let progress = elapsed / duration;
+                
+                if (progress > 1) {
+                    progress = 2 - progress;
+                }
+                
+                let x = 25 + (width - 50) * progress;
+                dot.style.left = x + 'px';
+                
+                animationId = requestAnimationFrame(animate);
+            }
+            
+            animate();
+        }
+
+        function stopAnimation() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        }
+
+        function getDotPosition() {
+            return {
+                x: parseFloat(dot.style.left) || window.innerWidth / 2,
+                y: window.innerHeight / 2
+            };
+        }
+
+        function captureFrame() {
+            let canvas = document.createElement('canvas');
+            canvas.width = 224;
+            canvas.height = 224;
+            let ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 224, 224);
+            return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        }
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        async function startRecording() {
+            mode = 'recording';
+            let distance = parseInt(document.getElementById('distance').value);
+            
+            if (!await initCamera()) return;
+            
+            showScreen('recordingScreen');
+            animateDot();
+            frameCount = 0;
+
+            let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(wsProtocol + '//' + window.location.host + '/ws/recording');
+
+            socket.onopen = () => {
+                socket.send(JSON.stringify({
+                    type: 'init',
+                    distance: distance,
+                    screen_width_cm: DEVICE_SPECS.screen.widthCm,
+                    screen_height_cm: DEVICE_SPECS.screen.heightCm,
+                    screen_width_px: DEVICE_SPECS.screen.widthPx,
+                    screen_height_px: DEVICE_SPECS.screen.heightPx,
+                    camera_x_px: DEVICE_SPECS.camera.positionPx.x,
+                    camera_y_px: DEVICE_SPECS.camera.positionPx.y,
+                }));
+            };
+
+            socket.onmessage = (event) => {
+                let data = JSON.parse(event.data);
+                if (data.status === 'saved') {
+                    frameCount = data.frame_count;
+                    document.getElementById('status').textContent = `Recorded ${frameCount} frames`;
+                } else if (data.status === 'session_started') {
+                    document.getElementById('status').textContent = 'Recording...';
+                }
+            };
+
+            frameInterval = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    let pos = getDotPosition();
+                    socket.send(JSON.stringify({
+                        type: 'frame',
+                        image: captureFrame(),
+                        dot_x: pos.x,
+                        dot_y: pos.y,
+                    }));
+                }
+            }, 100);
+        }
+
+        function stopRecording() {
+            if (frameInterval) clearInterval(frameInterval);
+            stopAnimation();
+            
+            if (socket) {
+                socket.send(JSON.stringify({ type: 'stop' }));
+                socket.close();
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            
+            document.getElementById('status').textContent = `Complete: ${frameCount} frames collected`;
+        }
+
+        async function refreshModels() {
+            try {
+                let response = await fetch(BACKEND_URL + '/api/models');
+                let data = await response.json();
+                let select = document.getElementById('modelSelect');
+                
+                select.innerHTML = '';
+                if (data.models && data.models.length > 0) {
+                    data.models.forEach(model => {
+                        let option = document.createElement('option');
+                        option.value = model;
+                        option.textContent = model;
+                        select.appendChild(option);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">No models found - train one first</option>';
+                }
+            } catch (err) {
+                document.getElementById('modelSelect').innerHTML = '<option value="">Error loading models</option>';
+            }
+        }
+
+        async function loadSelectedModel() {
+            let modelName = document.getElementById('modelSelect').value;
+            if (!modelName) {
+                alert('Please select a model first');
+                return false;
+            }
+
+            try {
+                let response = await fetch(BACKEND_URL + '/api/select-model/' + modelName, {
+                    method: 'POST'
+                });
+                let data = await response.json();
+                
+                if (data.error) {
+                    alert('Error loading model: ' + data.error);
+                    return false;
+                }
+                
+                selectedModel = modelName;
+                return true;
+            } catch (err) {
+                alert('Failed to load model: ' + err.message);
+                return false;
+            }
+        }
+
+        async function startInference() {
+            mode = 'inference';
+            let distance = parseInt(document.getElementById('distance').value);
+            
+            if (!await loadSelectedModel()) return;
+            if (!await initCamera()) return;
+            
+            showScreen('inferenceScreen');
+            animateDot();
+
+            let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(wsProtocol + '//' + window.location.host + '/ws/inference');
+
+            socket.onopen = () => {
+                socket.send(JSON.stringify({
+                    type: 'init',
+                    distance: distance,
+                    screen_width_cm: DEVICE_SPECS.screen.widthCm,
+                    screen_height_cm: DEVICE_SPECS.screen.heightCm,
+                    screen_width_px: DEVICE_SPECS.screen.widthPx,
+                    screen_height_px: DEVICE_SPECS.screen.heightPx,
+                    camera_x_px: DEVICE_SPECS.camera.positionPx.x,
+                    camera_y_px: DEVICE_SPECS.camera.positionPx.y,
+                }));
+            };
+
+            socket.onmessage = (event) => {
+                let data = JSON.parse(event.data);
+                
+                if (data.error) {
+                    document.getElementById('status').textContent = data.error;
+                    stopInference();
+                    return;
+                }
+                
+                if (data.status === 'inference_started') {
+                    document.getElementById('status').textContent = 'Testing...';
+                } else if (data.status === 'predicted') {
+                    document.getElementById('status').textContent = 
+                        `Error: ${data.error.h.toFixed(2)}° H, ${data.error.v.toFixed(2)}° V`;
+                } else if (data.status === 'test_complete') {
+                    let metrics = data.metrics;
+                    let metricsDiv = document.getElementById('metrics');
+                    metricsDiv.innerHTML = `
+                        <div class="metric-item">Mean Error H: ${metrics.mean_error_horizontal.toFixed(2)}°</div>
+                        <div class="metric-item">Mean Error V: ${metrics.mean_error_vertical.toFixed(2)}°</div>
+                        <div class="metric-item">RMS Error: ${metrics.rms_error.toFixed(2)}°</div>
+                        <div class="metric-item">Samples: ${metrics.num_samples}</div>
+                    `;
+                    metricsDiv.classList.add('show');
+                    document.getElementById('status').textContent = 'Test complete';
+                }
+            };
+
+            frameInterval = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    let pos = getDotPosition();
+                    socket.send(JSON.stringify({
+                        type: 'frame',
+                        image: captureFrame(),
+                        dot_x: pos.x,
+                        dot_y: pos.y,
+                    }));
+                }
+            }, 100);
+        }
+
+        function stopInference() {
+            if (frameInterval) clearInterval(frameInterval);
+            stopAnimation();
+            
+            if (socket) {
+                socket.send(JSON.stringify({ type: 'stop' }));
+                socket.close();
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        function backToSetup() {
+            if (mode === 'recording') stopRecording();
+            if (mode === 'inference') stopInference();
+            
+            showScreen('setupScreen');
+            document.getElementById('metrics').classList.remove('show');
+            mode = null;
+        }
+
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            refreshModels();
+            
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(() => {
+                    console.log('Orientation lock not supported');
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+

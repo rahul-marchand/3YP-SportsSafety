@@ -1,0 +1,52 @@
+WEB APP UPDATED - NOW WITH MODEL SELECTION UI
+
+ACCESS URL (open on your phone):
+https://2ca802009300.ngrok-free.app
+
+NEW FEATURES:
+
+1. LANDSCAPE MODE ENFORCED
+   - App only works in landscape orientation
+   - Will show "Please rotate device" message if in portrait
+   - Automatic orientation lock on supported devices
+
+2. MODEL SELECTION DROPDOWN
+   - Select which trained model to use directly in the web interface
+   - No need to use terminal/curl commands anymore
+   - Models automatically loaded from backend
+   - "Refresh Models" button to update list
+
+3. IMPROVED UI
+   - Clear visual feedback
+   - Better button layout
+   - Status messages for all operations
+
+HOW TO USE:
+
+RECORDING MODE (Collect Data):
+1. Open URL on phone
+2. Rotate to landscape
+3. Enter viewing distance (e.g., 30cm)
+4. Click "START RECORDING"
+5. Follow the red dot with your eyes
+6. Click "STOP RECORDING" when done (aim for 500+ frames)
+
+TRAINING (On Computer):
+cd /Users/suleimanmahmood/Documents/3YP/src/eye_tracking/smooth_pursuit
+source venv/bin/activate
+python train_smooth_pursuit.py --data_dir Dataset/smooth_pursuit_data --distance 30
+
+INFERENCE MODE (Test):
+1. Open URL on phone
+2. Enter viewing distance
+3. Select model from dropdown (e.g., model_30cm.pth)
+4. Click "START TEST"
+5. Follow the red dot
+6. Results will show mean errors and RMS error
+
+The model selection happens automatically in the web interface now - much easier than before!
+
+Dependencies fixed: tqdm installed
+Backend: Running with updated UI
+ngrok: Active at https://2ca802009300.ngrok-free.app
+

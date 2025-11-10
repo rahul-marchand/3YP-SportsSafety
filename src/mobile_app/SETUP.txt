@@ -1,0 +1,32 @@
+Smooth Pursuit Mobile App Setup
+
+1. Initialize React Native:
+   cd mobile_app
+   npx react-native@latest init SmoothPursuit --skip-install
+   cd SmoothPursuit
+
+2. Install dependencies:
+   npm install react-native-vision-camera
+   npm install react-native-reanimated
+   npm install socket.io-client
+   npm install @react-navigation/native @react-navigation/stack
+   npm install react-native-screens react-native-safe-area-context
+
+3. iOS setup (if using iOS):
+   cd ios && pod install && cd ..
+   Add camera permission to Info.plist:
+   <key>NSCameraUsageDescription</key>
+   <string>Required for eye tracking</string>
+
+4. Update babel.config.js to include reanimated plugin:
+   plugins: ['react-native-reanimated/plugin']
+
+5. Replace App.tsx/App.js with provided app code
+
+6. Update backend URL in src/config.js to your local IP:
+   export const BACKEND_URL = "http://YOUR_IP:8000";
+
+7. Run:
+   npm start
+   npm run ios  (or npm run android)
+

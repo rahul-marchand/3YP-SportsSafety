@@ -1,0 +1,40 @@
+SMOOTH PURSUIT EYE TRACKING - DEPLOYED AND READY
+
+BACKEND STATUS: RUNNING
+URL: https://2ca802009300.ngrok-free.app
+Dashboard: http://localhost:4040
+
+SETUP COMPLETE:
+- Virtual environment created
+- All dependencies installed
+- Backend running on port 8000
+- ngrok tunnel active
+- Mobile app config updated
+
+NEXT STEPS TO RUN ON YOUR PHONE:
+
+1. Setup React Native app (first time only):
+   cd /Users/suleimanmahmood/Documents/3YP/src/mobile_app
+   Follow instructions in SETUP.txt
+
+2. Update device specs in app_code/config.js for your phone model
+
+3. Run app on your phone and start collecting data
+
+WORKFLOW:
+1. Recording Mode - Collect training data
+2. Train Model - python train_smooth_pursuit.py --data_dir Dataset/smooth_pursuit_data --distance 30
+3. Inference Mode - Test smooth pursuit for concussion detection
+
+TO STOP BACKEND:
+pkill -f "python backend.py"
+pkill -f ngrok
+
+TO RESTART:
+cd /Users/suleimanmahmood/Documents/3YP/src/eye_tracking/smooth_pursuit
+./run_with_ngrok.sh
+
+FILES CREATED:
+Backend: src/eye_tracking/smooth_pursuit/
+Mobile: src/mobile_app/app_code/
+

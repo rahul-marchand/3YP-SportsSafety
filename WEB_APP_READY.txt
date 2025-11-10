@@ -1,0 +1,28 @@
+WEB APP IS LIVE
+
+Open this URL on your phone's browser:
+https://2ca802009300.ngrok-free.app
+
+INSTRUCTIONS:
+1. Open URL in phone browser (Safari, Chrome, etc.)
+2. Rotate phone to LANDSCAPE mode
+3. Allow camera permissions when asked
+4. Enter distance (30cm recommended)
+5. Click "START RECORDING" to collect training data
+6. Follow the red dot with your eyes only
+
+The app will:
+- Show a moving red dot
+- Capture your face/eyes silently in background
+- Send data to backend for processing
+- Store images with calculated gaze angles
+
+After collecting 500+ frames, you can train a model and use inference mode.
+
+QUICK TEST:
+Just open the URL and you should see the setup screen immediately.
+No app installation needed - works in browser!
+
+Backend running: http://localhost:8000
+ngrok Dashboard: http://localhost:4040
+

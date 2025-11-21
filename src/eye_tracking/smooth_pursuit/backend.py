@@ -1,9 +1,11 @@
 """
 FastAPI backend for smooth pursuit eye tracking data collection and inference.
 
-Two modes:
-1. Recording: Collect eye images with calculated gaze angles from dot position
-2. Inference: Use trained model to predict gaze angles and calculate metrics
+Modes:
+1. Recording (original): Single device with dot and camera
+2. Display Mode: Shows moving dot, broadcasts positions (for beam splitter setup)
+3. Camera Mode: Captures eye images, receives dot positions (for beam splitter setup)
+4. Inference: Use trained model to predict gaze angles and calculate metrics
 """
 
 import base64
@@ -482,6 +484,368 @@ def calculate_metrics(session_data):
         "rms_error": float(rms_error),
         "num_samples": len(session_data),
     }
+
+
+# =====================================================================
+# TWO-PHONE COORDINATION SYSTEM (for beam splitter setup)
+# =====================================================================
+
+class DotPositionBuffer:
+    """Buffer to store recent dot positions with timestamps for pairing."""
+    
+    def __init__(self, window_size=2.0):
+        """
+        Args:
+            window_size: Time window in seconds to keep positions
+        """
+        self.positions = []  # List of (timestamp, x, y) tuples
+        self.window_size = window_size
+    
+    def add_position(self, timestamp, x, y):
+        """Add a dot position with timestamp."""
+        self.positions.append((timestamp, x, y))
+        
+        # Remove old positions outside the window
+        cutoff_time = timestamp - self.window_size
+        self.positions = [p for p in self.positions if p[0] > cutoff_time]
+    
+    def get_position_at_time(self, target_timestamp, max_diff=0.1):
+        """
+        Get dot position closest to target timestamp.
+        
+        Args:
+            target_timestamp: Target time to find position for
+            max_diff: Maximum allowed time difference in seconds
+            
+        Returns:
+            (x, y) tuple or None if no suitable position found
+        """
+        if not self.positions:
+            return None
+        
+        # Find closest timestamp
+        closest = min(self.positions, key=lambda p: abs(p[0] - target_timestamp))
+        
+        # Check if time difference is acceptable
+        time_diff = abs(closest[0] - target_timestamp)
+        if time_diff > max_diff:
+            return None
+        
+        return closest[1], closest[2]
+    
+    def get_buffer_size(self):
+        """Return number of positions in buffer."""
+        return len(self.positions)
+
+
+class BeamSplitterAngleCalculator:
+    """Calculate gaze angles accounting for beam splitter geometry."""
+    
+    def __init__(self, screen_width_cm, screen_height_cm, screen_width_px, screen_height_px):
+        self.screen_width_cm = screen_width_cm
+        self.screen_height_cm = screen_height_cm
+        self.screen_width_px = screen_width_px
+        self.screen_height_px = screen_height_px
+        self.px_to_cm_x = screen_width_cm / screen_width_px
+        self.px_to_cm_y = screen_height_cm / screen_height_px
+    
+    def calculate_angles_with_beamsplitter(
+        self, 
+        dot_x_px, 
+        dot_y_px, 
+        eye_to_beamsplitter_cm,
+        beamsplitter_angle_deg=45
+    ):
+        """
+        Calculate gaze angles accounting for 45-degree beam splitter.
+        
+        For a 45° beam splitter setup:
+        - Display is vertical (above beam splitter)
+        - Eye views reflected virtual image
+        - Virtual image appears at same distance as display from beam splitter
+        
+        Args:
+            dot_x_px, dot_y_px: Dot position on display in pixels
+            eye_to_beamsplitter_cm: Distance from eye to beam splitter
+            beamsplitter_angle_deg: Beam splitter angle (default 45°)
+            
+        Returns:
+            (theta_h, theta_v) in degrees
+        """
+        # Convert pixel position to cm from screen center
+        screen_center_x = self.screen_width_px / 2
+        screen_center_y = self.screen_height_px / 2
+        
+        dot_x_cm = (dot_x_px - screen_center_x) * self.px_to_cm_x
+        dot_y_cm = (dot_y_px - screen_center_y) * self.px_to_cm_y
+        
+        # For 45° beam splitter, the virtual image position from eye's perspective:
+        # Horizontal angle: dot's horizontal position on screen
+        # Depth: eye_to_beamsplitter distance
+        
+        theta_h = np.degrees(np.arctan(dot_x_cm / eye_to_beamsplitter_cm))
+        theta_v = np.degrees(np.arctan(dot_y_cm / eye_to_beamsplitter_cm))
+        
+        return theta_h, theta_v
+
+
+# Global state for two-phone coordination
+coordination_state = {
+    "recording_active": False,
+    "display_connected": False,
+    "camera_connected": False,
+    "frame_count": 0,
+    "display_websocket": None,
+    "camera_websocket": None,
+    "session_dir": None,
+    "session_db_id": None,
+}
+
+dot_buffer = DotPositionBuffer()
+
+
+async def broadcast_command(command_data):
+    """Broadcast command to all connected clients."""
+    message = json.dumps(command_data)
+    
+    if coordination_state["display_websocket"]:
+        try:
+            await coordination_state["display_websocket"].send_text(message)
+        except:
+            pass
+    
+    if coordination_state["camera_websocket"]:
+        try:
+            await coordination_state["camera_websocket"].send_text(message)
+        except:
+            pass
+
+
+@app.get("/api/control/status")
+async def get_control_status():
+    """Get current recording status and connection state."""
+    return {
+        "recording_active": coordination_state["recording_active"],
+        "display_connected": coordination_state["display_connected"],
+        "camera_connected": coordination_state["camera_connected"],
+        "frame_count": coordination_state["frame_count"],
+        "buffer_size": dot_buffer.get_buffer_size(),
+    }
+
+
+@app.post("/api/control/start")
+async def start_coordinated_recording():
+    """Start recording on both display and camera phones."""
+    if not coordination_state["display_connected"]:
+        return {"error": "Display phone not connected"}
+    
+    if not coordination_state["camera_connected"]:
+        return {"error": "Camera phone not connected"}
+    
+    coordination_state["recording_active"] = True
+    coordination_state["frame_count"] = 0
+    
+    # Broadcast start command
+    await broadcast_command({"command": "start_recording"})
+    
+    print("Recording started - both phones activated")
+    return {"status": "Recording started", "message": "Both phones recording"}
+
+
+@app.post("/api/control/stop")
+async def stop_coordinated_recording():
+    """Stop recording on both phones."""
+    coordination_state["recording_active"] = False
+    
+    # Broadcast stop command
+    await broadcast_command({"command": "stop_recording"})
+    
+    print(f"Recording stopped - captured {coordination_state['frame_count']} frames")
+    return {
+        "status": "Recording stopped", 
+        "frames_captured": coordination_state["frame_count"]
+    }
+
+
+@app.websocket("/ws/display")
+async def display_mode(websocket: WebSocket):
+    """
+    Display mode: Shows moving dot and broadcasts position.
+    
+    Expected messages:
+    {
+        "type": "connect",
+        "distance": 30,
+        "screen_width_cm": 13.2,
+        "screen_height_cm": 6.1,
+        "screen_width_px": 2532,
+        "screen_height_px": 1170
+    }
+    
+    {
+        "type": "dot_position",
+        "x": 1200,
+        "y": 585,
+        "timestamp": 123.456
+    }
+    """
+    await websocket.accept()
+    coordination_state["display_websocket"] = websocket
+    coordination_state["display_connected"] = True
+    
+    print("Display phone connected")
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            
+            if data["type"] == "connect":
+                await websocket.send_json({
+                    "status": "connected",
+                    "message": "Display mode ready. Waiting for start command."
+                })
+            
+            elif data["type"] == "dot_position":
+                # Store dot position in buffer
+                dot_buffer.add_position(
+                    data["timestamp"],
+                    data["x"],
+                    data["y"]
+                )
+    
+    except WebSocketDisconnect:
+        coordination_state["display_connected"] = False
+        coordination_state["display_websocket"] = None
+        print("Display phone disconnected")
+
+
+@app.websocket("/ws/camera")
+async def camera_mode(websocket: WebSocket):
+    """
+    Camera mode: Captures eye images and pairs with dot positions.
+    
+    Expected messages:
+    {
+        "type": "init",
+        "distance": 30,
+        "screen_width_cm": 13.2,
+        "screen_height_cm": 6.1,
+        "screen_width_px": 2532,
+        "screen_height_px": 1170
+    }
+    
+    {
+        "type": "frame",
+        "image": "base64_encoded_image",
+        "timestamp": 123.458
+    }
+    """
+    await websocket.accept()
+    coordination_state["camera_websocket"] = websocket
+    coordination_state["camera_connected"] = True
+    
+    print("Camera phone connected")
+    
+    angle_calc = None
+    distance_cm = None
+    
+    try:
+        while True:
+            data = await websocket.receive_json()
+            
+            if data["type"] == "init":
+                distance_cm = data["distance"]
+                
+                # Create session for recording
+                session_dir, session_db_id, session_id = storage.create_session(
+                    distance_cm=distance_cm,
+                    screen_width_cm=data["screen_width_cm"],
+                    screen_height_cm=data["screen_height_cm"],
+                    screen_width_px=data["screen_width_px"],
+                    screen_height_px=data["screen_height_px"],
+                )
+                
+                coordination_state["session_dir"] = session_dir
+                coordination_state["session_db_id"] = session_db_id
+                
+                # Create beam splitter angle calculator
+                angle_calc = BeamSplitterAngleCalculator(
+                    data["screen_width_cm"],
+                    data["screen_height_cm"],
+                    data["screen_width_px"],
+                    data["screen_height_px"],
+                )
+                
+                await websocket.send_json({
+                    "status": "initialized",
+                    "session_id": session_id,
+                    "message": "Camera mode ready. Waiting for start command."
+                })
+            
+            elif data["type"] == "frame" and coordination_state["recording_active"]:
+                try:
+                    # Get dot position at this frame's timestamp
+                    dot_position = dot_buffer.get_position_at_time(data["timestamp"])
+                    
+                    if dot_position is None:
+                        await websocket.send_json({
+                            "status": "warning",
+                            "message": "No matching dot position found"
+                        })
+                        continue
+                    
+                    dot_x, dot_y = dot_position
+                    
+                    # Decode image
+                    image_bytes = base64.b64decode(data["image"])
+                    nparr = np.frombuffer(image_bytes, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    
+                    if frame is None:
+                        continue
+                    
+                    # Process frame
+                    processed_frame = frame_processor.process_frame(frame)
+                    
+                    if processed_frame is not None:
+                        # Calculate angles with beam splitter correction
+                        theta_h, theta_v = angle_calc.calculate_angles_with_beamsplitter(
+                            dot_x,
+                            dot_y,
+                            distance_cm
+                        )
+                        
+                        # Save frame
+                        storage.save_frame(
+                            coordination_state["session_dir"],
+                            coordination_state["session_db_id"],
+                            coordination_state["frame_count"],
+                            processed_frame,
+                            theta_h,
+                            theta_v,
+                            distance_cm,
+                        )
+                        
+                        coordination_state["frame_count"] += 1
+                        
+                        await websocket.send_json({
+                            "status": "saved",
+                            "frame_count": coordination_state["frame_count"],
+                            "theta_h": float(theta_h),
+                            "theta_v": float(theta_v),
+                        })
+                
+                except Exception as e:
+                    print(f"Error processing frame: {e}")
+                    await websocket.send_json({
+                        "status": "error",
+                        "message": str(e)
+                    })
+    
+    except WebSocketDisconnect:
+        coordination_state["camera_connected"] = False
+        coordination_state["camera_websocket"] = None
+        print("Camera phone disconnected")
 
 
 if __name__ == "__main__":

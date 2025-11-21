@@ -207,6 +207,11 @@
     <script>
         const BACKEND_URL = window.location.origin;
         
+        // Detect mode from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const APP_MODE = urlParams.get('mode');  // 'display', 'camera', or null
+        const DISTANCE = parseInt(urlParams.get('distance')) || 30;
+        
         let video = document.getElementById('camera');
         let dot = document.getElementById('dot');
         let stream = null;
@@ -231,6 +236,24 @@
                 },
             }
         };
+        
+        // Initialize based on mode
+        window.addEventListener('DOMContentLoaded', () => {
+            if (APP_MODE === 'display') {
+                initDisplayMode();
+            } else if (APP_MODE === 'camera') {
+                initCameraMode();
+            } else {
+                // Normal setup interface
+                refreshModels();
+                
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('landscape').catch(() => {
+                        console.log('Orientation lock not supported');
+                    });
+                }
+            }
+        });
 
         async function initCamera() {
             try {
@@ -508,15 +531,147 @@
             }
         });
 
-        window.addEventListener('DOMContentLoaded', () => {
-            refreshModels();
+        // =====================================================================
+        // DISPLAY MODE (for beam splitter setup)
+        // =====================================================================
+        
+        function initDisplayMode() {
+            console.log('Initializing Display Mode');
             
-            if (screen.orientation && screen.orientation.lock) {
-                screen.orientation.lock('landscape').catch(() => {
-                    console.log('Orientation lock not supported');
-                });
+            // Hide camera and controls
+            document.getElementById('camera').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+            
+            // Show only the dot
+            document.getElementById('dot').style.display = 'block';
+            
+            // Connect to display WebSocket
+            let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(wsProtocol + '//' + window.location.host + '/ws/display');
+            
+            socket.onopen = () => {
+                console.log('Display mode connected');
+                socket.send(JSON.stringify({
+                    type: 'connect',
+                    distance: DISTANCE,
+                    screen_width_cm: DEVICE_SPECS.screen.widthCm,
+                    screen_height_cm: DEVICE_SPECS.screen.heightCm,
+                    screen_width_px: DEVICE_SPECS.screen.widthPx,
+                    screen_height_px: DEVICE_SPECS.screen.heightPx,
+                }));
+            };
+            
+            socket.onmessage = (event) => {
+                let data = JSON.parse(event.data);
+                
+                if (data.command === 'start_recording') {
+                    console.log('Start command received - beginning dot animation');
+                    startDotAnimation();
+                }
+                
+                if (data.command === 'stop_recording') {
+                    console.log('Stop command received - stopping dot animation');
+                    stopAnimation();
+                }
+            };
+            
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        function startDotAnimation() {
+            animateDot();
+            
+            // Send dot position updates at 30 Hz
+            frameInterval = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    let pos = getDotPosition();
+                    socket.send(JSON.stringify({
+                        type: 'dot_position',
+                        x: pos.x,
+                        y: pos.y,
+                        timestamp: performance.now() / 1000.0  // Convert to seconds
+                    }));
+                }
+            }, 33);  // ~30 Hz
+        }
+        
+        // =====================================================================
+        // CAMERA MODE (for beam splitter setup)
+        // =====================================================================
+        
+        async function initCameraMode() {
+            console.log('Initializing Camera Mode');
+            
+            // Hide dot and controls
+            document.getElementById('dot').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+            
+            // Initialize camera
+            if (!await initCamera()) {
+                alert('Failed to initialize camera');
+                return;
             }
-        });
+            
+            // Connect to camera WebSocket
+            let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(wsProtocol + '//' + window.location.host + '/ws/camera');
+            
+            socket.onopen = () => {
+                console.log('Camera mode connected');
+                socket.send(JSON.stringify({
+                    type: 'init',
+                    distance: DISTANCE,
+                    screen_width_cm: DEVICE_SPECS.screen.widthCm,
+                    screen_height_cm: DEVICE_SPECS.screen.heightCm,
+                    screen_width_px: DEVICE_SPECS.screen.widthPx,
+                    screen_height_px: DEVICE_SPECS.screen.heightPx,
+                }));
+            };
+            
+            socket.onmessage = (event) => {
+                let data = JSON.parse(event.data);
+                
+                if (data.command === 'start_recording') {
+                    console.log('Start command received - beginning frame capture');
+                    startFrameCapture();
+                }
+                
+                if (data.command === 'stop_recording') {
+                    console.log('Stop command received - stopping frame capture');
+                    stopFrameCapture();
+                }
+                
+                if (data.status === 'saved') {
+                    console.log(`Frame ${data.frame_count} saved`);
+                }
+            };
+            
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        function startFrameCapture() {
+            // Capture frames at 10 Hz
+            frameInterval = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: 'frame',
+                        image: captureFrame(),
+                        timestamp: performance.now() / 1000.0  // Convert to seconds
+                    }));
+                }
+            }, 100);  // 10 Hz
+        }
+        
+        function stopFrameCapture() {
+            if (frameInterval) {
+                clearInterval(frameInterval);
+                frameInterval = null;
+            }
+        }
     </script>
 </body>
 </html>

@@ -22,6 +22,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
+from database import SmoothPursuitDB
+
 app = FastAPI()
 
 # Serve static files (web frontend)
@@ -105,31 +107,72 @@ class AngleCalculator:
 
 
 class DataStorage:
-    """Handle storage of collected images and metadata."""
+    """Handle storage of collected images and metadata using SQLite database."""
 
     def __init__(self, base_dir="Dataset/smooth_pursuit_data"):
         self.base_dir = Path(__file__).parent / base_dir
         self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.db = SmoothPursuitDB()
 
-    def create_session(self, distance_cm):
-        """Create new recording session directory."""
-        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    def create_session(
+        self,
+        distance_cm,
+        screen_width_cm=None,
+        screen_height_cm=None,
+        screen_width_px=None,
+        screen_height_px=None,
+        camera_x_px=None,
+        camera_y_px=None,
+    ):
+        """
+        Create new recording session in database and directory.
+        
+        Returns:
+            (session_dir, session_db_id, session_id_string) tuple
+        """
+        session_db_id, session_id = self.db.create_session(
+            distance_cm=distance_cm,
+            screen_width_cm=screen_width_cm,
+            screen_height_cm=screen_height_cm,
+            screen_width_px=screen_width_px,
+            screen_height_px=screen_height_px,
+            camera_x_px=camera_x_px,
+            camera_y_px=camera_y_px,
+        )
+        
+        # Still create directory for image files (for backward compatibility and training)
         session_dir = self.base_dir / f"session_{session_id}_{distance_cm}cm"
         session_dir.mkdir(exist_ok=True)
+        
+        return str(session_dir), session_db_id, session_id
 
-        metadata_file = session_dir / "metadata.csv"
-        with open(metadata_file, "w") as f:
-            f.write("frame_id,theta_h,theta_v,distance_cm,timestamp\n")
-
-        return str(session_dir), str(metadata_file)
-
-    def save_frame(self, session_dir, metadata_file, frame_id, image, theta_h, theta_v, distance_cm):
-        """Save cropped eye image and append metadata."""
-        image_path = Path(session_dir) / f"frame_{frame_id:06d}.jpg"
+    def save_frame(self, session_dir, session_db_id, frame_id, image, theta_h, theta_v, distance_cm):
+        """
+        Save frame image to disk and metadata to database.
+        
+        Args:
+            session_dir: Directory path for images
+            session_db_id: Database session ID
+            frame_id: Frame number
+            image: Processed image array
+            theta_h, theta_v: Gaze angles
+            distance_cm: Viewing distance
+        """
+        # Save image to disk
+        frame_filename = f"frame_{frame_id:06d}.jpg"
+        image_path = Path(session_dir) / frame_filename
         cv2.imwrite(str(image_path), image)
-
-        with open(metadata_file, "a") as f:
-            f.write(f"frame_{frame_id:06d}.jpg,{theta_h:.4f},{theta_v:.4f},{distance_cm},{time.time()}\n")
+        
+        # Save metadata to database
+        self.db.add_frame(
+            session_db_id=session_db_id,
+            frame_number=frame_id,
+            frame_filename=frame_filename,
+            theta_h=theta_h,
+            theta_v=theta_v,
+            distance_cm=distance_cm,
+            timestamp=time.time(),
+        )
 
 
 # Global state
@@ -212,7 +255,7 @@ async def recording_mode(websocket: WebSocket):
     await websocket.accept()
 
     session_dir = None
-    metadata_file = None
+    session_db_id = None
     angle_calc = None
     frame_count = 0
 
@@ -222,7 +265,15 @@ async def recording_mode(websocket: WebSocket):
 
             if data["type"] == "init":
                 distance = data["distance"]
-                session_dir, metadata_file = storage.create_session(distance)
+                session_dir, session_db_id, session_id = storage.create_session(
+                    distance_cm=distance,
+                    screen_width_cm=data["screen_width_cm"],
+                    screen_height_cm=data["screen_height_cm"],
+                    screen_width_px=data["screen_width_px"],
+                    screen_height_px=data["screen_height_px"],
+                    camera_x_px=data["camera_x_px"],
+                    camera_y_px=data["camera_y_px"],
+                )
 
                 angle_calc = AngleCalculator(
                     data["screen_width_cm"],
@@ -238,10 +289,11 @@ async def recording_mode(websocket: WebSocket):
                         "distance": distance,
                         "camera_x": data["camera_x_px"],
                         "camera_y": data["camera_y_px"],
+                        "session_db_id": session_db_id,
                     }
                 )
 
-                await websocket.send_json({"status": "session_started", "session_dir": session_dir})
+                await websocket.send_json({"status": "session_started", "session_dir": session_dir, "session_id": session_id})
 
             elif data["type"] == "frame":
                 try:
@@ -267,10 +319,10 @@ async def recording_mode(websocket: WebSocket):
                             current_session["distance"],
                         )
 
-                        # Save
+                        # Save to disk and database
                         storage.save_frame(
                             session_dir,
-                            metadata_file,
+                            session_db_id,
                             frame_count,
                             processed_frame,
                             theta_h,

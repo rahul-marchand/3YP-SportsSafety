@@ -1,12 +1,12 @@
 """
 Training script for smooth pursuit gaze model using collected data.
+Uses SQLite database to track sessions and training runs.
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,38 +17,45 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mobilenet.model import GazeMobileNet
+from database import SmoothPursuitDB
 
 
 class SmoothPursuitDataset(Dataset):
-    """Dataset from collected smooth pursuit recordings."""
+    """Dataset from collected smooth pursuit recordings using database."""
 
-    def __init__(self, session_dirs, transform=None):
+    def __init__(self, frame_records, base_data_dir, transform=None):
         """
         Args:
-            session_dirs: List of session directory paths
+            frame_records: List of database frame records (from db.get_frames_for_sessions)
+            base_data_dir: Base directory where session folders are stored
             transform: Image transforms
         """
         self.transform = transform or self._default_transform()
         self.samples = []
+        self.base_data_dir = Path(base_data_dir)
 
-        for session_dir in session_dirs:
-            session_path = Path(session_dir)
-            metadata_file = session_path / "metadata.csv"
+        for frame in frame_records:
+            # Construct image path from session_id and frame_filename
+            session_id = frame["session_id"]
+            frame_filename = frame["frame_filename"]
+            
+            # Session directory format: session_{session_id}_{distance}cm
+            # We need to find the actual session directory
+            session_dir = self.base_data_dir / f"session_{session_id}_{frame['distance_cm']}cm"
+            image_path = session_dir / frame_filename
+            
+            if image_path.exists():
+                self.samples.append(
+                    {
+                        "image_path": str(image_path),
+                        "theta_h": frame["theta_h"],
+                        "theta_v": frame["theta_v"],
+                    }
+                )
+            else:
+                print(f"Warning: Image not found: {image_path}")
 
-            if not metadata_file.exists():
-                print(f"Warning: No metadata in {session_dir}")
-                continue
-
-            df = pd.read_csv(metadata_file)
-
-            for _, row in df.iterrows():
-                image_path = session_path / row["frame_id"]
-                if image_path.exists():
-                    self.samples.append(
-                        {"image_path": str(image_path), "theta_h": row["theta_h"], "theta_v": row["theta_v"]}
-                    )
-
-        print(f"Loaded {len(self.samples)} samples from {len(session_dirs)} sessions")
+        print(f"Loaded {len(self.samples)} samples from database")
 
     @staticmethod
     def _default_transform():
@@ -128,24 +135,47 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Find all session directories
-    data_path = Path(args.data_dir)
-    session_dirs = [str(d) for d in data_path.glob("session_*") if (d / "metadata.csv").exists()]
-
-    if len(session_dirs) == 0:
-        print(f"No sessions found in {args.data_dir}")
+    # Connect to database
+    db = SmoothPursuitDB()
+    
+    # Get all sessions for the specified distance
+    sessions = db.get_sessions_by_distance(args.distance)
+    
+    if len(sessions) == 0:
+        print(f"No sessions found for distance {args.distance}cm in database")
+        db.close()
         return
 
-    print(f"Found {len(session_dirs)} sessions")
-
-    # Split into train/val
-    n_val = int(len(session_dirs) * args.val_split)
-    val_dirs = session_dirs[:n_val]
-    train_dirs = session_dirs[n_val:]
+    print(f"Found {len(sessions)} sessions for distance {args.distance}cm")
+    
+    # Get session database IDs
+    session_db_ids = [s["id"] for s in sessions]
+    
+    # Split into train/val by session (not by frame)
+    n_val = int(len(session_db_ids) * args.val_split)
+    val_session_ids = session_db_ids[:n_val]
+    train_session_ids = session_db_ids[n_val:]
+    
+    print(f"Training sessions: {len(train_session_ids)}, Validation sessions: {len(val_session_ids)}")
+    
+    # Get frames for each split
+    train_frames = db.get_frames_for_sessions(train_session_ids)
+    val_frames = db.get_frames_for_sessions(val_session_ids)
+    
+    if len(train_frames) == 0:
+        print(f"No training frames found for distance {args.distance}cm")
+        db.close()
+        return
+    
+    if len(val_frames) == 0:
+        print(f"Warning: No validation frames found. Using all data for training.")
+        val_frames = train_frames[-int(len(train_frames) * 0.1):]  # Use 10% for validation
+        train_frames = train_frames[:-int(len(train_frames) * 0.1)]
 
     # Create datasets
-    train_dataset = SmoothPursuitDataset(train_dirs)
-    val_dataset = SmoothPursuitDataset(val_dirs)
+    data_path = Path(args.data_dir)
+    train_dataset = SmoothPursuitDataset(train_frames, data_path)
+    val_dataset = SmoothPursuitDataset(val_frames, data_path)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
@@ -188,6 +218,29 @@ def main():
             print(f"Saved best model: {model_file}")
 
     print(f"\nTraining complete. Best validation loss: {best_val_loss:.4f}")
+    
+    # Record model and training run in database
+    model_name = f"model_{args.distance}cm.pth"
+    model_db_id = db.create_model(
+        model_name=model_name,
+        distance_cm=args.distance,
+        model_path=str(model_file),
+        best_val_loss=best_val_loss,
+        total_epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.lr,
+        notes=f"Trained on {len(train_dataset)} samples, validated on {len(val_dataset)} samples",
+    )
+    
+    # Link training sessions to model
+    db.link_training_sessions(model_db_id, train_session_ids, val_session_ids)
+    
+    print(f"\nModel recorded in database:")
+    print(f"  Model ID: {model_db_id}")
+    print(f"  Training sessions: {len(train_session_ids)}")
+    print(f"  Validation sessions: {len(val_session_ids)}")
+    
+    db.close()
 
 
 if __name__ == "__main__":

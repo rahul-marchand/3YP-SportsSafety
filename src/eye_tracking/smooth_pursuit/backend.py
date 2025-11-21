@@ -207,6 +207,17 @@ async def list_models():
     return {"models": models}
 
 
+@app.get("/api/time")
+async def get_server_time():
+    """
+    Get current server timestamp for client synchronization.
+    Returns time in seconds since epoch (Unix timestamp).
+    """
+    return {
+        "timestamp": time.time()
+    }
+
+
 @app.post("/api/select-model/{model_name}")
 async def select_model(model_name: str):
     """Load a trained model for inference."""
@@ -518,10 +529,10 @@ class DotPositionBuffer:
             max_diff: Maximum allowed time difference in seconds
             
         Returns:
-            (x, y) tuple or None if no suitable position found
+            ((x, y), time_diff) tuple or (None, None) if no suitable position found
         """
         if not self.positions:
-            return None
+            return None, None
         
         # Find closest timestamp
         closest = min(self.positions, key=lambda p: abs(p[0] - target_timestamp))
@@ -529,9 +540,9 @@ class DotPositionBuffer:
         # Check if time difference is acceptable
         time_diff = abs(closest[0] - target_timestamp)
         if time_diff > max_diff:
-            return None
+            return None, time_diff
         
-        return closest[1], closest[2]
+        return (closest[1], closest[2]), time_diff
     
     def get_buffer_size(self):
         """Return number of positions in buffer."""
@@ -785,16 +796,24 @@ async def camera_mode(websocket: WebSocket):
             elif data["type"] == "frame" and coordination_state["recording_active"]:
                 try:
                     # Get dot position at this frame's timestamp
-                    dot_position = dot_buffer.get_position_at_time(data["timestamp"])
+                    dot_position, time_diff = dot_buffer.get_position_at_time(data["timestamp"])
                     
                     if dot_position is None:
+                        if time_diff is not None:
+                            print(f"WARNING: No matching dot position found. Time diff: {time_diff*1000:.1f}ms (buffer size: {dot_buffer.get_buffer_size()})")
+                        else:
+                            print(f"WARNING: No dot positions in buffer (buffer empty)")
                         await websocket.send_json({
                             "status": "warning",
-                            "message": "No matching dot position found"
+                            "message": f"No matching dot position. Time diff: {time_diff*1000:.1f}ms" if time_diff else "Buffer empty"
                         })
                         continue
                     
                     dot_x, dot_y = dot_position
+                    
+                    # Log synchronization quality
+                    if coordination_state["frame_count"] % 10 == 0:  # Log every 10th frame
+                        print(f"Frame sync: time_diff={time_diff*1000:.1f}ms, buffer_size={dot_buffer.get_buffer_size()}")
                     
                     # Decode image
                     image_bytes = base64.b64decode(data["image"])
@@ -833,6 +852,7 @@ async def camera_mode(websocket: WebSocket):
                             "frame_count": coordination_state["frame_count"],
                             "theta_h": float(theta_h),
                             "theta_v": float(theta_v),
+                            "time_sync_ms": float(time_diff * 1000),
                         })
                 
                 except Exception as e:

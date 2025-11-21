@@ -222,6 +222,10 @@
         let frameCount = 0;
         let selectedModel = null;
 
+        // Time synchronization
+        let clockOffset = 0;  // Offset to add to local time to get server time
+        let timeSyncComplete = false;
+
         const DEVICE_SPECS = {
             screen: {
                 widthCm: 13.2,
@@ -236,6 +240,64 @@
                 },
             }
         };
+
+        /**
+         * Synchronize clock with server using multiple round-trip measurements.
+         * This ensures both phones use the same time reference.
+         */
+        async function synchronizeTime() {
+            console.log('Synchronizing time with server...');
+            const NUM_SAMPLES = 5;
+            let offsets = [];
+
+            for (let i = 0; i < NUM_SAMPLES; i++) {
+                const t0 = performance.now() / 1000.0;  // Client time before request
+                
+                try {
+                    const response = await fetch(BACKEND_URL + '/api/time');
+                    const t1 = performance.now() / 1000.0;  // Client time after response
+                    const data = await response.json();
+                    
+                    const serverTime = data.timestamp;
+                    const roundTripTime = t1 - t0;
+                    const estimatedServerTime = serverTime + roundTripTime / 2;
+                    
+                    // Calculate offset: server_time - local_time
+                    const offset = estimatedServerTime - t1;
+                    offsets.push(offset);
+                    
+                    console.log(`Time sync sample ${i+1}: offset=${offset.toFixed(6)}s, RTT=${(roundTripTime*1000).toFixed(1)}ms`);
+                } catch (error) {
+                    console.error('Time sync failed:', error);
+                }
+                
+                // Small delay between samples
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            if (offsets.length > 0) {
+                // Use median offset to avoid outliers
+                offsets.sort((a, b) => a - b);
+                clockOffset = offsets[Math.floor(offsets.length / 2)];
+                timeSyncComplete = true;
+                console.log(`Time synchronized! Clock offset: ${clockOffset.toFixed(6)}s`);
+                return true;
+            }
+            
+            console.error('Time synchronization failed');
+            return false;
+        }
+
+        /**
+         * Get synchronized server timestamp.
+         */
+        function getSyncedTimestamp() {
+            if (!timeSyncComplete) {
+                console.warn('Time not synchronized yet, using local time');
+                return performance.now() / 1000.0;
+            }
+            return (performance.now() / 1000.0) + clockOffset;
+        }
         
         // Initialize based on mode
         window.addEventListener('DOMContentLoaded', () => {
@@ -535,8 +597,14 @@
         // DISPLAY MODE (for beam splitter setup)
         // =====================================================================
         
-        function initDisplayMode() {
+        async function initDisplayMode() {
             console.log('Initializing Display Mode');
+            
+            // Synchronize time with server first
+            const syncSuccess = await synchronizeTime();
+            if (!syncSuccess) {
+                alert('Failed to synchronize time with server. Data may be inaccurate.');
+            }
             
             // Hide camera and controls
             document.getElementById('camera').style.display = 'none';
@@ -587,11 +655,12 @@
             frameInterval = setInterval(() => {
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     let pos = getDotPosition();
+                    const timestamp = getSyncedTimestamp();
                     socket.send(JSON.stringify({
                         type: 'dot_position',
                         x: pos.x,
                         y: pos.y,
-                        timestamp: performance.now() / 1000.0  // Convert to seconds
+                        timestamp: timestamp
                     }));
                 }
             }, 33);  // ~30 Hz
@@ -603,6 +672,12 @@
         
         async function initCameraMode() {
             console.log('Initializing Camera Mode');
+            
+            // Synchronize time with server first
+            const syncSuccess = await synchronizeTime();
+            if (!syncSuccess) {
+                alert('Failed to synchronize time with server. Data may be inaccurate.');
+            }
             
             // Hide dot and controls
             document.getElementById('dot').style.display = 'none';
@@ -644,7 +719,11 @@
                 }
                 
                 if (data.status === 'saved') {
-                    console.log(`Frame ${data.frame_count} saved`);
+                    console.log(`Frame ${data.frame_count} saved - theta_h: ${data.theta_h.toFixed(2)}°, theta_v: ${data.theta_v.toFixed(2)}°`);
+                }
+                
+                if (data.status === 'warning') {
+                    console.warn(`Warning: ${data.message}`);
                 }
             };
             
@@ -657,10 +736,11 @@
             // Capture frames at 10 Hz
             frameInterval = setInterval(() => {
                 if (socket && socket.readyState === WebSocket.OPEN) {
+                    const timestamp = getSyncedTimestamp();
                     socket.send(JSON.stringify({
                         type: 'frame',
                         image: captureFrame(),
-                        timestamp: performance.now() / 1000.0  // Convert to seconds
+                        timestamp: timestamp
                     }));
                 }
             }, 100);  // 10 Hz

@@ -9,6 +9,7 @@ This system coordinates two phones through a beam splitter for accurate eye trac
 3. **Camera Phone**: Rear camera captures eye images
 4. **Backend**: Synchronizes both phones and calculates correct gaze angles
 5. **Terminal Control**: Start/stop recording from laptop
+6. **Time Synchronization**: Both phones sync clocks with server for accurate data pairing
 
 ## Hardware Setup
 
@@ -116,6 +117,29 @@ python control.py status
 2. Pairs camera frames with dot positions by timestamp
 3. Calculates gaze angles accounting for 45° beam splitter geometry
 4. Saves paired data: `[eye_image.jpg, theta_h, theta_v]`
+
+### Time Synchronization
+
+**Critical for accurate training data**: Both phones sync clocks with server on connection.
+
+**How it works:**
+1. Each phone pings `/api/time` endpoint 5 times on init
+2. Measures round-trip time and calculates clock offset
+3. Uses median offset to avoid network jitter
+4. All timestamps use: `synced_time = local_time + offset`
+
+**Backend pairing:**
+- Finds dot position within ±100ms of each frame timestamp
+- Logs sync quality every 10 frames
+- Warns if no matching dot position found
+
+**Expected performance:**
+- Sync accuracy: <10ms (typical WiFi LAN)
+- Pairing tolerance: ±100ms window
+- Monitor backend terminal for sync warnings
+
+**Why this matters:**
+Without time sync, frames could be paired with wrong dot positions, creating incorrect angle labels and ruining your training data.
 
 ## Beam Splitter Geometry
 

@@ -40,13 +40,13 @@ class GazeMobileNet(nn.Module):
         num_features = self.backbone.classifier[1].in_features
 
         # Replace classifier with regression head
-        # Output: 2 values (vertical angle, horizontal angle)
+        # Output: 2 values (horizontal angle, vertical angle) - matches training data format [theta_h, theta_v]
         self.backbone.classifier = nn.Sequential(
             nn.Dropout(p=0.2, inplace=False),
             nn.Linear(num_features, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(p=0.2, inplace=False),
-            nn.Linear(512, 2),  # 2 outputs: vertical, horizontal
+            nn.Linear(512, 2),  # 2 outputs: horizontal (theta_h), vertical (theta_v)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -57,7 +57,7 @@ class GazeMobileNet(nn.Module):
             x: Input tensor of shape (batch_size, 3, 224, 224)
 
         Returns:
-            Predicted gaze angles of shape (batch_size, 2) [vertical, horizontal]
+            Predicted gaze angles of shape (batch_size, 2) [horizontal (theta_h), vertical (theta_v)]
         """
         return self.backbone(x)
 

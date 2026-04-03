@@ -240,7 +240,7 @@ def main():
 
     # Loss
     print(f"Loss: {args.loss}")
-    criterion = get_loss(args.loss)
+    criterion = get_loss(args.loss).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
 

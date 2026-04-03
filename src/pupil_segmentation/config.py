@@ -16,3 +16,8 @@ NORMALIZE_STD = 0.5
 # RITnet architecture
 RITNET_BASE_CHANNELS = 32
 RITNET_IN_CHANNELS = 1  # grayscale
+
+# Collected dataset properties
+# After applying the headset vignette crop (25% off each side), the effective
+# resolution of our collected 224x224 images is 112x112.
+COLLECTED_CROP_SIZE = (112, 112)  # (H, W)

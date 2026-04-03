@@ -14,7 +14,7 @@ class EllipseParams:
 
     center: tuple[float, float]  # (cx, cy)
     axes: tuple[float, float]  # (major_axis, minor_axis) as diameters
-    angle: float  # rotation angle in degrees
+    angle: float  # rotation angle of the major axis in degrees
     valid: bool = True  # False if fitting failed
 
     @property
@@ -66,8 +66,14 @@ def fit_ellipse_to_mask(
 
     try:
         (cx, cy), (w, h), angle = cv2.fitEllipse(largest)
-        # Ensure major >= minor
-        major, minor = max(w, h), min(w, h)
+        # Ensure major >= minor. cv2.fitEllipse reports angle relative to the
+        # w axis, so when we swap axes we must rotate 90° to keep angle aligned
+        # with the major axis.
+        if w >= h:
+            major, minor = w, h
+        else:
+            major, minor = h, w
+            angle = (angle + 90) % 180
         return EllipseParams((cx, cy), (major, minor), angle)
     except cv2.error:
         return EllipseParams((0.0, 0.0), (0.0, 0.0), 0.0, valid=False)

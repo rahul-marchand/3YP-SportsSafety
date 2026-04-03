@@ -192,6 +192,14 @@ def main():
     parser.add_argument(
         "--no_preprocessing", action="store_true", help="Disable gamma+CLAHE preprocessing"
     )
+    parser.add_argument(
+        "--augmentation",
+        type=str,
+        default="none",
+        choices=["none", "standard", "domain"],
+        help="Augmentation mode: none, standard (flip/rotate/brightness/noise), "
+        "domain (standard + sclera brightening + resolution downsample)",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_wandb", action="store_true", help="Disable wandb logging")
 
@@ -211,12 +219,17 @@ def main():
 
     # Data
     apply_preprocessing = not args.no_preprocessing
-    print(f"Loading dataset... (preprocessing={'on' if apply_preprocessing else 'off'})")
+    print(
+        f"Loading dataset... "
+        f"(preprocessing={'on' if apply_preprocessing else 'off'}, "
+        f"augmentation={args.augmentation})"
+    )
     train_loader, val_loader, _ = get_dataloaders(
         args.data_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         apply_preprocessing=apply_preprocessing,
+        augmentation=args.augmentation,
     )
 
     # Model

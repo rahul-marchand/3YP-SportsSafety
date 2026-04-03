@@ -2,8 +2,9 @@
 
 ## Overview
 
-Three batches of experiments. Batch 1 is fully independent (run in parallel).
-Batch 2 depends on Batch 1 results. Batch 3 is post-hoc analysis (no training).
+Four batches of experiments. Batch 1 is fully independent (run in parallel).
+Batch 2 depends on Batch 1 results. Batch 3 is augmentation ablation. Batch 4 is
+post-hoc analysis (no training).
 
 **Data directory:** set `DATA_DIR` to your OpenEDS root (containing `train/`, `validation/`, `test/`).
 
@@ -87,7 +88,39 @@ Benchmark as above.
 
 ---
 
-## Batch 3: Post-hoc analysis (no training)
+## Batch 3: Augmentation ablation (2 experiments)
+
+Uses the best loss from Batch 1 (update "compound" below to the actual best).
+
+### Standard augmentation (flip, rotate, brightness, contrast, noise)
+
+```bash
+uv run python src/pupil_segmentation/train.py --data_dir $DATA_DIR --model ritnet --loss compound --augmentation standard --save_dir checkpoints/ritnet_compound_aug_std --num_epochs 50 --no_wandb
+```
+
+### Domain adaptation (standard + sclera brightening + resolution downsample)
+
+```bash
+uv run python src/pupil_segmentation/train.py --data_dir $DATA_DIR --model ritnet --loss compound --augmentation domain --save_dir checkpoints/ritnet_compound_aug_domain --num_epochs 50 --no_wandb
+```
+
+### Benchmark
+
+```bash
+uv run python src/pupil_segmentation/benchmark.py --checkpoint checkpoints/ritnet_compound_aug_std/best_model.pth    --data_dir $DATA_DIR --model ritnet --output_json results/ritnet_compound_aug_std.json
+uv run python src/pupil_segmentation/benchmark.py --checkpoint checkpoints/ritnet_compound_aug_domain/best_model.pth --data_dir $DATA_DIR --model ritnet --output_json results/ritnet_compound_aug_domain.json
+```
+
+### Or use the ablation runner
+
+```bash
+uv run python src/pupil_segmentation/run_ablations.py --data_dir $DATA_DIR --experiment ritnet_compound_aug_std
+uv run python src/pupil_segmentation/run_ablations.py --data_dir $DATA_DIR --experiment ritnet_compound_aug_domain
+```
+
+---
+
+## Batch 4: Post-hoc analysis (no training)
 
 ### PLR robustness experiments
 
@@ -116,8 +149,11 @@ uv run python -m src.pupil_segmentation.evaluation.plots --plot blinks --robustn
 Run best model on collected headset images:
 
 ```bash
-# TODO: script for headset inference + overlay visualisation
-uv run python src/pupil_segmentation/benchmark.py --checkpoint checkpoints/{best}/best_model.pth --data_dir {headset_data} --model ritnet --output_json results/headset_validation.json
+uv run python src/pupil_segmentation/predict.py \
+    --checkpoint checkpoints/{best}/best_model.pth \
+    --model ritnet \
+    --input {headset_image_dir} \
+    --output results/headset_validation
 ```
 
 ---
@@ -131,6 +167,7 @@ uv run python src/pupil_segmentation/benchmark.py --checkpoint checkpoints/{best
 | Architecture comparison | `results/ritnet_{best}.json`, `results/unet_{best}.json` | Params, Size, Pupil IoU, Iris IoU, Axis err, FPS |
 | Loss ablation | `results/ritnet_*.json` (4 losses) | Loss, Pupil IoU, Iris IoU, Axis err |
 | Preprocessing ablation | `results/ritnet_{best}.json`, `results/ritnet_*_no_preproc.json` | Preprocessing, Pupil IoU, Axis err |
+| Augmentation ablation | `results/ritnet_*_aug_*.json` | Augmentation, Pupil IoU, Axis err |
 
 ### Main body figures
 
@@ -140,7 +177,7 @@ uv run python src/pupil_segmentation/benchmark.py --checkpoint checkpoints/{best
 | PLR fitted curve | `figures/plr_fitted_curve.pdf` | Synthetic data + fitted model + annotations |
 | Noise robustness | `figures/robustness_noise.pdf` | Parameter recovery vs noise σ |
 | Blink robustness | `figures/robustness_blinks.pdf` | Parameter recovery vs blink duration |
-| Headset validation | TODO | Segmentation overlays on real images |
+| Headset validation | `results/headset_validation/` | Segmentation overlays on real images |
 
 ### Appendix
 

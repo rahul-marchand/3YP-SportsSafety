@@ -30,6 +30,7 @@ class OpenEDSDataset(Dataset):
         split: Literal["train", "validation", "test"] = "train",
         apply_preprocessing: bool = True,
         target_size: tuple[int, int] | None = None,
+        transform=None,
     ):
         """
         Initialize OpenEDS dataset.
@@ -39,11 +40,14 @@ class OpenEDSDataset(Dataset):
             split: Dataset split to use
             apply_preprocessing: Whether to apply gamma correction and CLAHE
             target_size: Optional (H, W) to resize images. None keeps original size.
+            transform: Optional SegmentationTransform for data augmentation.
+                Called as transform(image, mask) -> (image, mask) on numpy arrays.
         """
         self.root_dir = Path(root_dir)
         self.split = split
         self.apply_preprocessing = apply_preprocessing
         self.target_size = target_size or OPENEDS_IMAGE_SIZE
+        self.transform = transform
 
         # OpenEDS structure: root/split/images/*.png and root/split/labels/*.npy
         self.split_dir = self.root_dir / split
@@ -102,6 +106,10 @@ class OpenEDSDataset(Dataset):
         if self.apply_preprocessing:
             image = self._preprocess(image)
 
+        # Apply augmentation (training only — val/test should pass transform=None)
+        if self.transform is not None:
+            image, mask = self.transform(image, mask)
+
         # Resize if needed
         if (image.shape[0], image.shape[1]) != self.target_size:
             image = cv2.resize(image, (self.target_size[1], self.target_size[0]))
@@ -126,6 +134,7 @@ def get_dataloaders(
     num_workers: int = 4,
     apply_preprocessing: bool = True,
     target_size: tuple[int, int] | None = None,
+    augmentation: str = "none",
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """
     Create train, validation, and test dataloaders.
@@ -136,14 +145,37 @@ def get_dataloaders(
         num_workers: Number of workers for data loading
         apply_preprocessing: Whether to apply gamma correction and CLAHE
         target_size: Optional (H, W) to resize images
+        augmentation: Augmentation mode for training data. One of:
+            "none" — no augmentation (default)
+            "standard" — flip, rotation, brightness, contrast, noise
+            "domain" — standard + sclera brightening + resolution downsample
 
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
     """
+    from .augmentation import get_domain_transforms, get_standard_transforms
+
+    valid_augmentations = ("none", "standard", "domain")
+    if augmentation not in valid_augmentations:
+        raise ValueError(
+            f"Unknown augmentation '{augmentation}'. Choose from: {valid_augmentations}"
+        )
+
+    if augmentation == "standard":
+        train_transform = get_standard_transforms()
+    elif augmentation == "domain":
+        train_transform = get_domain_transforms()
+    else:
+        train_transform = None
+
     use_pin_memory = torch.cuda.is_available()
 
     train_dataset = OpenEDSDataset(
-        root_dir, split="train", apply_preprocessing=apply_preprocessing, target_size=target_size
+        root_dir,
+        split="train",
+        apply_preprocessing=apply_preprocessing,
+        target_size=target_size,
+        transform=train_transform,
     )
     val_dataset = OpenEDSDataset(
         root_dir,

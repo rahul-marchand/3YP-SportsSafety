@@ -19,6 +19,7 @@ class Experiment:
     model: str
     loss: str
     preprocessing: bool
+    augmentation: str = "none"
     note: str = ""
 
 
@@ -36,6 +37,23 @@ EXPERIMENTS = [
     # Batch 2: Run after Batch 1 results (update loss to best from Batch 1)
     # Experiment("unet_{best}", "unet", "{best_loss}", True),
     # Experiment("ritnet_{best}_no_preproc", "ritnet", "{best_loss}", False),
+    # -- Augmentation ablation (update loss to best from Batch 1)
+    Experiment(
+        "ritnet_compound_aug_std",
+        "ritnet",
+        "compound",
+        True,
+        augmentation="standard",
+        note="Best baseline + standard augmentation",
+    ),
+    Experiment(
+        "ritnet_compound_aug_domain",
+        "ritnet",
+        "compound",
+        True,
+        augmentation="domain",
+        note="Best baseline + standard + domain adaptation",
+    ),
 ]
 
 
@@ -65,6 +83,8 @@ def build_command(
     ]
     if not exp.preprocessing:
         cmd.append("--no_preprocessing")
+    if exp.augmentation != "none":
+        cmd.extend(["--augmentation", exp.augmentation])
     return cmd
 
 

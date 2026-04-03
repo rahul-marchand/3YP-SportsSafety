@@ -29,7 +29,7 @@ from src.pupil_segmentation.evaluation.metrics import (  # noqa: E402
     get_model_size_mb,
     measure_inference_time,
 )
-from src.pupil_segmentation.models.ritnet import create_ritnet  # noqa: E402
+from src.pupil_segmentation.models import create_model  # noqa: E402
 
 
 @torch.no_grad()
@@ -174,6 +174,9 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark pupil segmentation models")
     parser.add_argument("--checkpoint", type=Path, required=True, help="Model checkpoint path")
     parser.add_argument("--data_dir", type=Path, required=True, help="OpenEDS dataset directory")
+    parser.add_argument(
+        "--model", type=str, default="ritnet", help="Model architecture (ritnet, unet)"
+    )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--wandb", action="store_true", help="Log to wandb")
@@ -184,8 +187,8 @@ def main():
     print(f"Using device: {device}")
 
     # Load model
-    print(f"Loading model from {args.checkpoint}...")
-    model = create_ritnet(pretrained_path=args.checkpoint, device=device)
+    print(f"Loading {args.model} from {args.checkpoint}...")
+    model = create_model(args.model, pretrained_path=args.checkpoint, device=device)
 
     # Load test data
     print("Loading test data...")

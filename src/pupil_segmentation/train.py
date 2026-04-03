@@ -17,7 +17,8 @@ sys.path.insert(0, str(project_root))
 
 from src.pupil_segmentation.Dataset.dataloader import get_dataloaders  # noqa: E402
 from src.pupil_segmentation.evaluation.metrics import compute_dice, compute_iou  # noqa: E402
-from src.pupil_segmentation.models.ritnet import create_ritnet  # noqa: E402
+from src.pupil_segmentation.losses import get_loss  # noqa: E402
+from src.pupil_segmentation.models import create_model  # noqa: E402
 
 
 def train_epoch(
@@ -163,13 +164,22 @@ def main():
     script_dir = Path(__file__).resolve().parent
     default_save_dir = script_dir / "checkpoints"
 
-    parser = argparse.ArgumentParser(description="Train RITnet for pupil segmentation")
+    parser = argparse.ArgumentParser(description="Train segmentation model for pupil/iris")
     parser.add_argument("--data_dir", type=Path, required=True, help="OpenEDS dataset directory")
     parser.add_argument("--save_dir", type=Path, default=default_save_dir)
+    parser.add_argument(
+        "--model", type=str, default="ritnet", help="Model architecture (ritnet, unet)"
+    )
+    parser.add_argument(
+        "--loss", type=str, default="ce", help="Loss function (ce, dice, ce_dice, compound)"
+    )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_epochs", type=int, default=50)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument(
+        "--no_preprocessing", action="store_true", help="Disable gamma+CLAHE preprocessing"
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_wandb", action="store_true", help="Disable wandb logging")
 
@@ -188,19 +198,24 @@ def main():
         )
 
     # Data
-    print("Loading dataset...")
+    apply_preprocessing = not args.no_preprocessing
+    print(f"Loading dataset... (preprocessing={'on' if apply_preprocessing else 'off'})")
     train_loader, val_loader, _ = get_dataloaders(
-        args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers
+        args.data_dir,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        apply_preprocessing=apply_preprocessing,
     )
 
     # Model
-    print("Creating RITnet...")
-    model = create_ritnet(device=device)
+    print(f"Creating {args.model}...")
+    model = create_model(args.model, device=device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {total_params:,}")
 
-    # Training setup
-    criterion = nn.CrossEntropyLoss()
+    # Loss
+    print(f"Loss: {args.loss}")
+    criterion = get_loss(args.loss)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
 

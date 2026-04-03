@@ -103,6 +103,79 @@ def compute_pupil_iris_ratio(
     return pupil.mean_diameter / iris.mean_diameter
 
 
+def fit_ellipse_soft(
+    prob_map: np.ndarray,
+    threshold: float = 0.5,
+    min_points: int = 20,
+) -> EllipseParams:
+    """Fit ellipse using probability-weighted pixel coordinates.
+
+    Instead of hard thresholding, weights each pixel's contribution by its
+    predicted probability, improving accuracy at uncertain boundaries.
+
+    Args:
+        prob_map: (H, W) softmax probabilities for a single class
+        threshold: Minimum probability to include a pixel
+        min_points: Minimum pixels required for fitting
+    """
+    ys, xs = np.where(prob_map > threshold)
+    if len(ys) < min_points:
+        return EllipseParams((0.0, 0.0), (0.0, 0.0), 0.0, valid=False)
+
+    weights = prob_map[ys, xs]
+    total_w = weights.sum()
+
+    # Weighted mean
+    cx = np.sum(xs * weights) / total_w
+    cy = np.sum(ys * weights) / total_w
+
+    # Weighted covariance
+    dx = xs - cx
+    dy = ys - cy
+    cov_xx = np.sum(weights * dx * dx) / total_w
+    cov_xy = np.sum(weights * dx * dy) / total_w
+    cov_yy = np.sum(weights * dy * dy) / total_w
+    cov = np.array([[cov_xx, cov_xy], [cov_xy, cov_yy]])
+
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+    # Semi-axes: 2*sqrt(eigenvalue) gives ~95% of a Gaussian; scale to approximate diameter
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+
+    if eigenvalues[0] <= 0 or eigenvalues[1] <= 0:
+        return EllipseParams((0.0, 0.0), (0.0, 0.0), 0.0, valid=False)
+
+    major = 4.0 * np.sqrt(eigenvalues[0])
+    minor = 4.0 * np.sqrt(eigenvalues[1])
+    angle = np.degrees(np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0]))
+
+    return EllipseParams((cx, cy), (major, minor), angle)
+
+
+def compute_pupil_iris_ratio_soft(
+    prob_map_4class: np.ndarray,
+    pupil_idx: int = CLASS_IDS["pupil"],
+    iris_idx: int = CLASS_IDS["iris"],
+    threshold: float = 0.5,
+) -> float:
+    """Compute pupil/iris diameter ratio from soft probability maps.
+
+    Args:
+        prob_map_4class: (C, H, W) softmax probabilities for all classes
+        pupil_idx: Channel index for pupil class
+        iris_idx: Channel index for iris class
+        threshold: Minimum probability for inclusion
+    """
+    pupil = fit_ellipse_soft(prob_map_4class[pupil_idx], threshold)
+    iris = fit_ellipse_soft(prob_map_4class[iris_idx], threshold)
+
+    if not pupil.valid or not iris.valid or iris.mean_diameter == 0:
+        return 0.0
+
+    return pupil.mean_diameter / iris.mean_diameter
+
+
 def compute_ellipse_error(
     pred_params: EllipseParams,
     gt_params: EllipseParams,

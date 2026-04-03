@@ -1,7 +1,9 @@
 """Benchmarking script for pupil segmentation models."""
 
 import argparse
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -179,6 +181,7 @@ def main():
     )
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--output_json", type=Path, default=None, help="Save results to JSON")
     parser.add_argument("--wandb", action="store_true", help="Log to wandb")
 
     args = parser.parse_args()
@@ -199,6 +202,19 @@ def main():
     # Run benchmark
     results = benchmark_model(model, test_loader, device)
     print_results(results)
+
+    # Save JSON
+    if args.output_json:
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        output = {
+            "model": args.model,
+            "checkpoint": str(args.checkpoint),
+            "timestamp": datetime.now().isoformat(),
+            **results.to_dict(),
+        }
+        with open(args.output_json, "w") as f:
+            json.dump(output, f, indent=2)
+        print(f"Results saved to {args.output_json}")
 
     # Log to wandb
     if args.wandb:

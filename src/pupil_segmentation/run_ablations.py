@@ -23,20 +23,19 @@ class Experiment:
 
 
 EXPERIMENTS = [
-    # Round 1: Loss function ablation (RITnet, default preprocessing)
+    # Batch 1: All independent, can run in parallel
+    # -- Loss ablation (RITnet, default preprocessing)
     Experiment("ritnet_ce", "ritnet", "ce", True),
     Experiment("ritnet_dice", "ritnet", "dice", True),
     Experiment("ritnet_ce_dice", "ritnet", "ce_dice", True),
     Experiment("ritnet_compound", "ritnet", "compound", True),
-    # Round 2: Preprocessing ablation (RITnet, best loss from Round 1)
-    # TODO: update loss to best from Round 1 after results
-    Experiment("ritnet_no_preproc", "ritnet", "compound", False),
-    # TODO: gamma-only and CLAHE-only require dataloader changes to toggle independently
-    # Experiment("ritnet_gamma_only", "ritnet", "compound", True, "needs dataloader change"),
-    # Experiment("ritnet_clahe_only", "ritnet", "compound", True, "needs dataloader change"),
-    # Round 3: Architecture comparison (best loss + preprocessing from Rounds 1-2)
-    # TODO: update loss to best from Round 1 after results
-    Experiment("unet_compound", "unet", "compound", True),
+    # -- Architecture baseline (U-Net with CE for fair initial comparison)
+    Experiment("unet_ce", "unet", "ce", True),
+    # -- Preprocessing ablation (CE baseline, no preprocessing)
+    Experiment("ritnet_no_preproc", "ritnet", "ce", False),
+    # Batch 2: Run after Batch 1 results (update loss to best from Batch 1)
+    # Experiment("unet_{best}", "unet", "{best_loss}", True),
+    # Experiment("ritnet_{best}_no_preproc", "ritnet", "{best_loss}", False),
 ]
 
 

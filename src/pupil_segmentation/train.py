@@ -1,6 +1,7 @@
 """Training script for RITnet on OpenEDS dataset."""
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
@@ -107,6 +108,13 @@ def train(
     best_val_iou = 0.0
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    # CSV logging
+    csv_path = save_dir / "metrics.csv"
+    fieldnames = ["epoch", "train_loss", "val_loss", "val_iou", "val_dice", "lr"]
+    csv_file = open(csv_path, "w", newline="")  # noqa: SIM115
+    csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    csv_writer.writeheader()
+
     print(f"\nTraining for {num_epochs} epochs on {device}")
     print(f"Train: {len(train_loader.dataset)}, Val: {len(val_loader.dataset)} samples")
     print(f"Checkpoints: {save_dir}\n")
@@ -128,6 +136,8 @@ def train(
         }
         if use_wandb:
             wandb.log(metrics)
+        csv_writer.writerow({"epoch": epoch, **metrics})
+        csv_file.flush()
 
         print(
             f"Epoch {epoch}/{num_epochs} - "
@@ -157,7 +167,9 @@ def train(
                 save_dir / f"checkpoint_epoch_{epoch}.pth",
             )
 
+    csv_file.close()
     print(f"\nTraining complete. Best IoU: {best_val_iou:.4f}")
+    print(f"Metrics saved to {csv_path}")
 
 
 def main():

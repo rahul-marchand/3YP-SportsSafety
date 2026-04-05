@@ -39,6 +39,7 @@ def benchmark_model(
     model: torch.nn.Module,
     test_loader: torch.utils.data.DataLoader,
     device: str,
+    target_size: tuple[int, int] | None = None,
 ) -> BenchmarkResults:
     """Run full benchmark on a model."""
     model.eval()
@@ -104,29 +105,40 @@ def benchmark_model(
     )
 
     pupil_metrics = EllipseMetrics(
-        center_error=np.mean(pupil_ellipse_errors["center"])
+        center_error=np.median(pupil_ellipse_errors["center"])
         if pupil_ellipse_errors["center"]
         else 0,
-        axis_error=np.mean(pupil_ellipse_errors["axis"]) if pupil_ellipse_errors["axis"] else 0,
-        angle_error=np.mean(pupil_ellipse_errors["angle"]) if pupil_ellipse_errors["angle"] else 0,
+        axis_error=np.median(pupil_ellipse_errors["axis"])
+        if pupil_ellipse_errors["axis"]
+        else 0,
+        angle_error=np.median(pupil_ellipse_errors["angle"])
+        if pupil_ellipse_errors["angle"]
+        else 0,
     )
 
     iris_metrics = EllipseMetrics(
-        center_error=np.mean(iris_ellipse_errors["center"]) if iris_ellipse_errors["center"] else 0,
-        axis_error=np.mean(iris_ellipse_errors["axis"]) if iris_ellipse_errors["axis"] else 0,
-        angle_error=np.mean(iris_ellipse_errors["angle"]) if iris_ellipse_errors["angle"] else 0,
+        center_error=np.median(iris_ellipse_errors["center"])
+        if iris_ellipse_errors["center"]
+        else 0,
+        axis_error=np.median(iris_ellipse_errors["axis"])
+        if iris_ellipse_errors["axis"]
+        else 0,
+        angle_error=np.median(iris_ellipse_errors["angle"])
+        if iris_ellipse_errors["angle"]
+        else 0,
     )
 
     # Timing
     print("Measuring inference time...")
-    input_size = (1, 1, OPENEDS_IMAGE_SIZE[0], OPENEDS_IMAGE_SIZE[1])
+    img_size = target_size or OPENEDS_IMAGE_SIZE
+    input_size = (1, 1, img_size[0], img_size[1])
     inference_time = measure_inference_time(model, input_size, device)
 
     return BenchmarkResults(
         segmentation=seg_metrics,
         ellipse_pupil=pupil_metrics,
         ellipse_iris=iris_metrics,
-        pupil_iris_ratio_mae=np.mean(ratio_errors) if ratio_errors else 0,
+        pupil_iris_ratio_mae=np.median(ratio_errors) if ratio_errors else 0,
         inference_time_ms=inference_time,
         model_size_mb=get_model_size_mb(model),
         fps=1000.0 / inference_time if inference_time > 0 else 0,
@@ -182,6 +194,14 @@ def main():
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--output_json", type=Path, default=None, help="Save results to JSON")
+    parser.add_argument(
+        "--target_size",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar=("H", "W"),
+        help="Resize images to (H, W). Must match training resolution.",
+    )
     parser.add_argument("--wandb", action="store_true", help="Log to wandb")
 
     args = parser.parse_args()
@@ -194,13 +214,17 @@ def main():
     model = create_model(args.model, pretrained_path=args.checkpoint, device=device)
 
     # Load test data
-    print("Loading test data...")
+    target_size = tuple(args.target_size) if args.target_size else None
+    print(f"Loading test data...{f' (resized to {target_size})' if target_size else ''}")
     _, _, test_loader = get_dataloaders(
-        args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers
+        args.data_dir,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        target_size=target_size,
     )
 
     # Run benchmark
-    results = benchmark_model(model, test_loader, device)
+    results = benchmark_model(model, test_loader, device, target_size=target_size)
     print_results(results)
 
     # Save JSON

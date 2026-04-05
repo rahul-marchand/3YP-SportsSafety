@@ -64,7 +64,10 @@ def crop_headset_vignette(image: np.ndarray) -> np.ndarray:
     return image[int(0.25 * h) : int(0.75 * h), int(0.25 * w) : int(0.75 * w)]
 
 
-def preprocess_image(image: np.ndarray) -> tuple[torch.Tensor, tuple[int, int]]:
+def preprocess_image(
+    image: np.ndarray,
+    target_size: tuple[int, int] | None = None,
+) -> tuple[torch.Tensor, tuple[int, int]]:
     """Preprocess a grayscale image for inference.
 
     Crops the headset vignette, resizes, and normalizes. No gamma correction
@@ -73,6 +76,7 @@ def preprocess_image(image: np.ndarray) -> tuple[torch.Tensor, tuple[int, int]]:
 
     Args:
         image: Grayscale image (H, W) as uint8
+        target_size: Optional (H, W) to resize to. Defaults to OPENEDS_IMAGE_SIZE.
 
     Returns:
         Tuple of (tensor, original_size) where tensor is (1, 1, H, W)
@@ -82,8 +86,9 @@ def preprocess_image(image: np.ndarray) -> tuple[torch.Tensor, tuple[int, int]]:
 
     # Resize to expected size
     original_size = image.shape[:2]
-    if original_size != OPENEDS_IMAGE_SIZE:
-        image = cv2.resize(image, (OPENEDS_IMAGE_SIZE[1], OPENEDS_IMAGE_SIZE[0]))
+    resize_to = target_size or OPENEDS_IMAGE_SIZE
+    if original_size != resize_to:
+        image = cv2.resize(image, (resize_to[1], resize_to[0]))
 
     # Normalize
     image = image.astype(np.float32) / 255.0
@@ -162,6 +167,7 @@ class PupilSegmentor:
         checkpoint_path: str | Path,
         model_name: str = "ritnet",
         device: str = "cuda",
+        target_size: tuple[int, int] | None = None,
     ):
         """Initialize segmentor.
 
@@ -169,8 +175,10 @@ class PupilSegmentor:
             checkpoint_path: Path to trained model checkpoint
             model_name: Model architecture name ('ritnet' or 'unet')
             device: Device to run inference on ('cuda' or 'cpu')
+            target_size: Optional (H, W) input size. Must match training resolution.
         """
         self.device = device
+        self.target_size = target_size
         self.model = create_model(model_name, pretrained_path=checkpoint_path, device=device)
         self.model.eval()
 
@@ -188,7 +196,7 @@ class PupilSegmentor:
             - 'iris_ellipse': EllipseParams for iris
             - 'pupil_iris_ratio': float ratio of pupil/iris diameter
         """
-        tensor, original_size = preprocess_image(image)
+        tensor, original_size = preprocess_image(image, target_size=self.target_size)
         tensor = tensor.to(self.device)
 
         with autocast(device_type=self.device, enabled=self.device != "cpu"):
@@ -197,7 +205,8 @@ class PupilSegmentor:
         mask = output.argmax(dim=1).squeeze(0).cpu().numpy()
 
         # Resize mask back to original size if needed
-        if original_size != OPENEDS_IMAGE_SIZE:
+        model_size = self.target_size or OPENEDS_IMAGE_SIZE
+        if original_size != model_size:
             mask = cv2.resize(
                 mask.astype(np.uint8),
                 (original_size[1], original_size[0]),
@@ -364,6 +373,14 @@ def main():
         action="store_true",
         help="Don't draw ellipses on visualization",
     )
+    parser.add_argument(
+        "--target_size",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar=("H", "W"),
+        help="Model input size. Must match training resolution.",
+    )
 
     args = parser.parse_args()
 
@@ -381,7 +398,10 @@ def main():
     print(f"Using device: {device}")
     print(f"Loading {args.model} from {args.checkpoint}...")
 
-    segmentor = PupilSegmentor(args.checkpoint, model_name=args.model, device=device)
+    target_size = tuple(args.target_size) if args.target_size else None
+    segmentor = PupilSegmentor(
+        args.checkpoint, model_name=args.model, device=device, target_size=target_size
+    )
 
     if args.input.is_file():
         print(f"Processing single image: {args.input}")

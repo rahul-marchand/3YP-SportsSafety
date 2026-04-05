@@ -79,12 +79,12 @@ def benchmark_model(
             pupil_err = compute_ellipse_error(pred_pupil, gt_pupil)
             iris_err = compute_ellipse_error(pred_iris, gt_iris)
 
-            if pupil_err["center_error"] != float("inf"):
+            if all(np.isfinite(v) for v in pupil_err.values()):
                 pupil_ellipse_errors["center"].append(pupil_err["center_error"])
                 pupil_ellipse_errors["axis"].append(pupil_err["axis_error"])
                 pupil_ellipse_errors["angle"].append(pupil_err["angle_error"])
 
-            if iris_err["center_error"] != float("inf"):
+            if all(np.isfinite(v) for v in iris_err.values()):
                 iris_ellipse_errors["center"].append(iris_err["center_error"])
                 iris_ellipse_errors["axis"].append(iris_err["axis_error"])
                 iris_ellipse_errors["angle"].append(iris_err["angle_error"])

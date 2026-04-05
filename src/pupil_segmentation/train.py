@@ -200,6 +200,14 @@ def main():
         help="Augmentation mode: none, standard (flip/rotate/brightness/noise), "
         "domain (standard + sclera brightening + resolution downsample)",
     )
+    parser.add_argument(
+        "--target_size",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar=("H", "W"),
+        help="Resize images to (H, W). Default: original OpenEDS size (400x640)",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_wandb", action="store_true", help="Disable wandb logging")
 
@@ -224,12 +232,14 @@ def main():
         f"(preprocessing={'on' if apply_preprocessing else 'off'}, "
         f"augmentation={args.augmentation})"
     )
+    target_size = tuple(args.target_size) if args.target_size else None
     train_loader, val_loader, _ = get_dataloaders(
         args.data_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         apply_preprocessing=apply_preprocessing,
         augmentation=args.augmentation,
+        target_size=target_size,
     )
 
     # Model

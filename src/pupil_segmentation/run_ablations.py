@@ -20,6 +20,7 @@ class Experiment:
     loss: str
     preprocessing: bool
     augmentation: str = "none"
+    target_size: tuple[int, int] | None = None
     note: str = ""
 
 
@@ -54,6 +55,15 @@ EXPERIMENTS = [
         augmentation="domain",
         note="Best baseline + standard + domain adaptation",
     ),
+    Experiment(
+        "ritnet_compound_aug_domain_112",
+        "ritnet",
+        "compound",
+        True,
+        augmentation="domain",
+        target_size=(112, 112),
+        note="Domain adaptation + train at headset resolution",
+    ),
 ]
 
 
@@ -85,6 +95,8 @@ def build_command(
         cmd.append("--no_preprocessing")
     if exp.augmentation != "none":
         cmd.extend(["--augmentation", exp.augmentation])
+    if exp.target_size is not None:
+        cmd.extend(["--target_size", str(exp.target_size[0]), str(exp.target_size[1])])
     return cmd
 
 
